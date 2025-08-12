@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Neon Workspace — Unique Single-file Webapp</title>
+  <meta name="description" content="A small, unique single-file HTML webapp: neon animated background, sticky cards, tiny palette generator, persistent notes."/>
+  <style>
+    :root{
+      --bg:#081028; --glass: rgba(255,255,255,0.06);
+      --accent1: #7ef9ff; --accent2:#9b8cff; --accent3:#ff7eb6;
+      --card-radius: 14px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: radial-gradient(1200px 600px at 10% 10%, rgba(155,140,255,0.06), transparent), radial-gradient(1000px 500px at 90% 90%, rgba(127,249,255,0.04), transparent), var(--bg); color:#e6eef8}
+    header{display:flex;gap:12px;align-items:center;padding:18px 22px}
+    .logo{display:flex;align-items:center;gap:12px}
+    .mark{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent1),var(--accent2));display:flex;align-items:center;justify-content:center;box-shadow:0 6px 30px rgba(91,43,255,0.14);font-weight:700;color:#021}
+    h1{font-size:1.05rem;margin:0}
+    p.lead{margin:0;color:rgba(230,238,248,0.7);font-size:0.86rem}
+
+    main{display:grid;grid-template-columns:1fr 360px;gap:20px;padding:18px}
+    @media (max-width:920px){main{grid-template-columns:1fr}}
+
+    /* Canvas area */
+    .board{min-height:60vh;padding:18px;border-radius:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));backdrop-filter: blur(6px);box-shadow: inset 0 1px 0 rgba(255,255,255,0.02)}
+
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    button, .btn{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:10px;cursor:pointer;color:inherit}
+    .btn.primary{background:linear-gradient(90deg,var(--accent1),var(--accent2));color:#021;border:none}
+
+    /* Sticky notes */
+    .note{width:220px;padding:12px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);position:absolute;box-shadow:0 8px 24px rgba(2,8,23,0.6)}
+    .note textarea{width:100%;height:100px;background:transparent;border:none;color:inherit;font-size:0.9rem;resize:none;font-family:inherit}
+    .note .meta{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .note .drag{cursor:move;font-family:var(--mono);font-size:0.8rem;opacity:0.7}
+
+    /* Right sidebar */
+    aside{padding:18px;border-radius:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));backdrop-filter: blur(6px)}
+    .panel{margin-bottom:14px}
+    label{display:block;font-size:0.78rem;margin-bottom:6px;color:rgba(230,238,248,0.75)}
+    input[type=range]{width:100%}
+
+    .palette{display:flex;gap:8px}
+    .swatch{width:44px;height:44px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)}
+
+    footer{padding:14px;text-align:center;color:rgba(230,238,248,0.6);font-size:0.82rem}
+
+    /* animated particles canvas overlay */
+    #bgcanvas{position:fixed;inset:0;z-index:-1;pointer-events:none}
+
+    /* micro transitions */
+    .note, button, .btn{transition:transform .18s ease, box-shadow .18s ease}
+    button:active, .btn:active{transform:translateY(1px)}
+
+    .tiny-help{font-size:0.8rem;color:rgba(230,238,248,0.6)}
+  </style>
+</head>
+<body>
+  <canvas id="bgcanvas"></canvas>
+  <header>
+    <div class="logo">
+      <div class="mark">NW</div>
+      <div>
+        <h1>Neon Workspace</h1>
+        <p class="lead">Single-file webapp • sticky notes • palette generator • local persistence</p>
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <div class="tiny-help" id="time">—</div>
+      <button id="newNote" class="btn primary">+ New Note</button>
+      <button id="clearAll" class="btn" title="Remove all notes">Clear</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="board" id="board">
+      <div class="controls">
+        <button id="saveBtn" class="btn">Save workspace</button>
+        <button id="exportBtn" class="btn">Export JSON</button>
+        <div style="margin-left:auto" class="tiny-help">Drag notes to rearrange • Double-click note to delete</div>
+      </div>
+      <!-- notes appear here -->
+    </section>
+
+    <aside>
+      <div class="panel">
+        <label>Palette Generator</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="genPalette" class="btn">Generate</button>
+          <button id="applyPalette" class="btn">Apply to Notes</button>
+        </div>
+        <div class="palette" id="palette"></div>
+      </div>
+
+      <div class="panel">
+        <label>Background Speed</label>
+        <input id="speedRange" type="range" min="0" max="2" step="0.01" value="1">
+        <label style="margin-top:10px">Note Opacity</label>
+        <input id="noteOpacity" type="range" min="0.3" max="1" step="0.01" value="1">
+      </div>
+
+      <div class="panel">
+        <label>Workspace</label>
+        <button id="loadBtn" class="btn">Load saved</button>
+        <button id="resetTheme" class="btn">Reset theme</button>
+      </div>
+    </aside>
+  </main>
+
+  <footer>Made with ✨ — open-source friendly. Your notes stay in your browser (localStorage).</footer>
+
+  <script>
+    /* ---------- Utilities ---------- */
+    const uid = (n=6)=> Math.random().toString(36).slice(2,2+n);
+    const board = document.getElementById('board');
+    const timeEl = document.getElementById('time');
+    const paletteEl = document.getElementById('palette');
+
+    // show current time (local)
+    function tickTime(){
+      const d = new Date();
+      timeEl.textContent = d.toLocaleString();
+    }
+    setInterval(tickTime,1000); tickTime();
+
+    /* ---------- Note Management ---------- */
+    const NOTES_KEY = 'neon_workspace_notes_v1';
+    let notes = {};
+
+    function createNote({id, x=40, y=60, content='', color=null}={}){
+      id = id || uid(8);
+      const el = document.createElement('div');
+      el.className = 'note'; el.style.left = x+'px'; el.style.top = y+'px'; el.dataset.id = id;
+      if(color) el.style.border = '1px solid rgba(255,255,255,0.06)';
+      el.innerHTML = `
+        <div class="meta">
+          <div class="drag">${id.slice(0,4)}</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn tiny save">Save</button>
+            <button class="btn tiny del">✕</button>
+          </div>
+        </div>
+        <textarea placeholder="Write something...">${escapeHtml(content)}</textarea>
+      `;
+      if(color) el.style.background = `linear-gradient(180deg, ${color}22, ${color}11)`;
+      el.querySelector('.del').addEventListener('click',()=>{ removeNote(id); });
+      el.querySelector('.save').addEventListener('click',()=>{ persistNotes(); });
+      const ta = el.querySelector('textarea');
+      ta.addEventListener('input', debounce(()=> persistNotes(), 450));
+
+      // drag
+      makeDraggable(el);
+      board.appendChild(el);
+      notes[id] = {id, x, y, content, color};
+      return el;
+    }
+
+    function escapeHtml(s=''){return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
+
+    function removeNote(id){
+      const el = board.querySelector(`[data-id='${id}']`);
+      if(el) el.remove();
+      delete notes[id];
+      persistNotes();
+    }
+
+    function persistNotes(){
+      // collect latest positions and content
+      document.querySelectorAll('.note').forEach(n=>{
+        const id=n.dataset.id; const r=n.getBoundingClientRect();
+        const ta = n.querySelector('textarea');
+        notes[id] = { id, x: Math.round(n.offsetLeft), y: Math.round(n.offsetTop), content: ta.value, color: n.style.background? n.style.background: null };
+      });
+      localStorage.setItem(NOTES_KEY, JSON.stringify(Object.values(notes)));
+      flashSaved();
+    }
+
+    function loadNotes(){
+      const raw = localStorage.getItem(NOTES_KEY);
+      if(!raw) return;
+      try{
+        const arr = JSON.parse(raw);
+        // clear existing
+        document.querySelectorAll('.note').forEach(n=>n.remove()); notes={};
+        arr.forEach(n => createNote(n));
+      }catch(e){console.warn('load failed', e)}
+    }
+
+    function exportJSON(){
+      persistNotes();
+      const data = JSON.stringify(Object.values(notes), null, 2);
+      const blob = new Blob([data], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download='neon_workspace_export.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // small visual saved confirmation
+    function flashSaved(){
+      const b = document.getElementById('saveBtn'); b.textContent='Saved ✓'; setTimeout(()=>b.textContent='Save workspace',900);
+    }
+
+    document.getElementById('newNote').addEventListener('click',()=>{
+      const x = 40 + Math.random()*220; const y = 80 + Math.random()*160; createNote({x,y,content:''});
+    });
+    document.getElementById('saveBtn').addEventListener('click',persistNotes);
+    document.getElementById('exportBtn').addEventListener('click',exportJSON);
+    document.getElementById('clearAll').addEventListener('click',()=>{
+      if(confirm('Clear all notes?')){ document.querySelectorAll('.note').forEach(n=>n.remove()); notes={}; localStorage.removeItem(NOTES_KEY);} });
+    document.getElementById('loadBtn').addEventListener('click',loadNotes);
+
+    // double-click to delete note
+    board.addEventListener('dblclick', e=>{
+      const n = e.target.closest('.note'); if(n && confirm('Delete this note?')) removeNote(n.dataset.id);
+    });
+
+    // on load try to restore
+    loadNotes();
+
+    /* ---------- Dragging helpers ---------- */
+    function makeDraggable(node){
+      let isDown=false, startX=0, startY=0, origX=0, origY=0;
+      const dragHandle = node.querySelector('.drag');
+      dragHandle.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault(); node.setPointerCapture(ev.pointerId);
+        isDown=true; startX=ev.clientX; startY=ev.clientY; origX=node.offsetLeft; origY=node.offsetTop; node.style.zIndex=1000;
+      });
+      window.addEventListener('pointermove', (ev)=>{
+        if(!isDown) return; const dx = ev.clientX - startX; const dy = ev.clientY - startY; node.style.left = (origX + dx) + 'px'; node.style.top = (origY + dy) + 'px';
+      });
+      window.addEventListener('pointerup', (ev)=>{
+        if(!isDown) return; isDown=false; node.releasePointerCapture?.(ev.pointerId); node.style.zIndex=''; // save position
+        const id = node.dataset.id; notes[id] = { ...notes[id], x: node.offsetLeft, y: node.offsetTop, content: node.querySelector('textarea').value, color: node.style.background };
+        persistNotes();
+      });
+    }
+
+    /* ---------- Palette Generator ---------- */
+    function randHue(){ return Math.floor(Math.random()*360); }
+    function hslToHex(h,s,l){
+      s/=100; l/=100; const k=(n)=> (n + h/30) % 12; const a = s*Math.min(l,1-l);
+      const f = n => Math.round(255*(l - a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)) )));
+      return '#'+[f(0),f(8),f(4)].map(x=>x.toString(16).padStart(2,'0')).join('');
+    }
+    function genPalette(){
+      const base = randHue(); const arr=[];
+      for(let i=0;i<4;i++){ const hue = (base + i*34) % 360; arr.push(hslToHex(hue, 75, 60)); }
+      return arr;
+    }
+    function showPalette(arr){ paletteEl.innerHTML=''; arr.forEach(c=>{ const d=document.createElement('div'); d.className='swatch'; d.style.background=c; d.title=c; d.addEventListener('click',()=>{ copyToClipboard(c); alert('Copied '+c); }); paletteEl.appendChild(d); }); }
+
+    document.getElementById('genPalette').addEventListener('click', ()=>{ const p = genPalette(); showPalette(p); window.currentPalette = p; });
+    document.getElementById('applyPalette').addEventListener('click', ()=>{
+      const p = window.currentPalette || genPalette(); // apply to each note's background
+      let i=0; document.querySelectorAll('.note').forEach(n=>{ n.style.background = `linear-gradient(180deg, ${p[i%p.length]}22, ${p[(i+1)%p.length]}11)`; i++; });
+      persistNotes();
+    });
+
+    function copyToClipboard(t){ navigator.clipboard?.writeText(t).catch(()=>{}); }
+
+    /* ---------- Tiny helpers ---------- */
+    function debounce(fn, wait=200){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); } }
+
+    /* ---------- Background particles (canvas) ---------- */
+    const canvas = document.getElementById('bgcanvas'); const ctx = canvas.getContext('2d'); let w=0,h=0, particles=[]; let speed=1.0;
+    function resize(){ w=canvas.width = innerWidth; h=canvas.height = innerHeight; }
+    onresize = resize; resize();
+
+    function makeParticles(n=60){ particles=[]; for(let i=0;i<n;i++){ particles.push({x:Math.random()*w,y:Math.random()*h, vx:(Math.random()-0.5)*0.3, vy:(Math.random()-0.5)*0.3, r: 8+Math.random()*18, hue: Math.random()*360}); } }
+    makeParticles(90);
+
+    function draw(){ ctx.clearRect(0,0,w,h);
+      for(const p of particles){
+        p.x += p.vx * speed; p.y += p.vy * speed;
+        if(p.x<-50) p.x=w+50; if(p.x> w+50) p.x=-50; if(p.y<-50) p.y=h+50; if(p.y>h+50) p.y=-50;
+        const g = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+        g.addColorStop(0, `hsla(${p.hue},80%,60%,0.14)`);
+        g.addColorStop(0.5, `hsla(${(p.hue+60)%360},60%,50%,0.06)`);
+        g.addColorStop(1, `rgba(2,6,23,0)`);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      }
+      // subtle link lines
+      for(let i=0;i<particles.length;i++){
+        for(let j=i+1;j<particles.length;j++){ const a=particles[i], b=particles[j]; const dx=a.x-b.x, dy=a.y-b.y; const d= Math.hypot(dx,dy); if(d<120){ ctx.strokeStyle = `hsla(${a.hue},80%,60%,${0.016*(120-d)})`; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); } }
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    // react to speed range
+    document.getElementById('speedRange').addEventListener('input', (e)=>{ speed = 0.1 + Number(e.target.value); });
+    document.getElementById('noteOpacity').addEventListener('input', (e)=>{ document.querySelectorAll('.note').forEach(n=>n.style.opacity = e.target.value); persistNotes(); });
+
+    /* ---------- Small persistence restore for theme (palettes) ---------- */
+    document.getElementById('resetTheme').addEventListener('click', ()=>{ document.querySelectorAll('.note').forEach(n=>n.style.background=''); localStorage.removeItem('neon_workspace_theme'); persistNotes(); });
+
+    // load theme from last palette
+    (function tryLoadTheme(){ try{ const raw = localStorage.getItem(NOTES_KEY); if(raw){ const arr=JSON.parse(raw); arr.forEach(n=>{ if(n.color===null) return; /* we'll rely on inline styles already saved */ }); } }catch(e){} })();
+
+    /* ---------- Small nicety: quick demo notes if empty ---------- */
+    if(Object.keys(notes).length===0 && document.querySelectorAll('.note').length===0){
+      createNote({x:40,y:120,content:'Welcome to Neon Workspace!\n\n• Click + New Note to create sticky notes.\n• Drag the header code (e.g., 1a2b) to move.\n• Generate palettes and apply them to notes.\n• Notes are saved in your browser.'});
+      createNote({x:320,y:180,content:'Tip: Click "Export JSON" to save notes externally.'});
+      persistNotes();
+    }
+
+  </script>
+</body>
+</html>
