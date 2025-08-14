@@ -1,4 +1,4 @@
-name: Deploy Docker App (Self-Hosted)
+name: Deploy Docker App (Self-Hosted to Remote Docker VM)
 
 on:
   push:
@@ -6,20 +6,32 @@ on:
       - main
 
 jobs:
-  deploy:
+  cicd:
     runs-on: self-hosted
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    - name: Stop & Remove Existing Container
+    - name: Deploy to Remote Docker VM
+      env:
+        DOCKER_HOST: ${{ secrets.DOCKER_VM_HOST }}   # e.g. ubuntu@172.31.30.71
+        SSH_KEY: ${{ secrets.DOCKER_VM_SSH_KEY }}
       run: |
-        docker stop myapp || true
-        docker rm myapp || true
+        echo "$SSH_KEY" > ssh_key.pem
+        chmod 600 ssh_key.pem
 
-    - name: Build Docker Image
-      run: docker build -t myapp .
+        # Create app folder on remote VM
+        ssh -o StrictHostKeyChecking=no -i ssh_key.pem $DOCKER_HOST "mkdir -p ~/myapp"
 
-    - name: Run Docker Container
-      run: docker run -d -p 80:80 --name myapp myapp
+        # Copy files to remote VM
+        rsync -avz -e "ssh -i ssh_key.pem -o StrictHostKeyChecking=no" ./ $DOCKER_HOST:~/myapp
+
+        # Build & run container remotely
+        ssh -o StrictHostKeyChecking=no -i ssh_key.pem $DOCKER_HOST << 'EOF'
+          cd ~/myapp
+          docker stop myapp || true
+          docker rm myapp || true
+          docker build -t myapp .
+          docker run -d -p 80:80 --name myapp myapp
+        EOF
